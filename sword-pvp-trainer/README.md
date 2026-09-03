@@ -31,47 +31,59 @@ own singleplayer/LAN world** — most servers that allow client-side mods at
 all still disallow hitbox reveals specifically, separate from cooldown
 overlays which are usually fine (they mirror the vanilla attack indicator).
 
-## Building
+## Building — you must fill in version numbers first
 
-Requires JDK 17 and Gradle 8.x. This project doesn't ship a Gradle wrapper
+Requires JDK 21 and Gradle 8.x. This project doesn't ship a Gradle wrapper
 binary — either use a system Gradle install, or generate one yourself:
 
 ```bash
 gradle wrapper --gradle-version 8.8   # one-time, if you don't have Gradle installed globally
-./gradlew build
 ```
 
-The first build downloads Minecraft 1.20.1, Yarn mappings, and Fabric
-Loader/API — it needs internet access and can take several minutes. The
-compiled mod jar lands in `build/libs/sword-pvp-trainer-1.0.0.jar`.
+**Before running `./gradlew build`**, open `gradle.properties` and
+`build.gradle` and replace every `REPLACE_ME` placeholder:
 
-**Not yet build-verified.** The environment this mod was written in blocks
-outbound access to `maven.fabricmc.net` (network policy, confirmed via a
-403 on the CONNECT), so `gradle build` could not actually be run there —
-the source was written and reviewed carefully against known Fabric API
-patterns for 1.20.1, but hasn't compiled successfully anywhere yet. On your
-first build, if the `fabric-loom` plugin version fails to resolve, check
-the current stable version at https://fabricmc.net/develop/ (or search
-`fabric-loom` on https://plugins.gradle.org/) and update the version in
-`build.gradle`'s `plugins {}` block — `gradle.properties`'s
-`yarn_mappings`/`loader_version`/`fabric_version` may need bumping to match
-whatever's current too.
+- `gradle.properties`: `yarn_mappings`, `loader_version`, `fabric_version`
+- `build.gradle`: the `fabric-loom` plugin version (currently a guess:
+  `1.9-SNAPSHOT`)
+
+Get the real values from https://fabricmc.net/develop/ (select Minecraft
+1.21.11) and the [Fabric API releases](https://modrinth.com/mod/fabric-api)
+page for a build tagged 1.21.11. **This environment blocks
+`fabricmc.net`, `meta.fabricmc.net`, and `modrinth.com` outright** (not
+just the Maven artifact host — a straight `curl`/WebFetch to any of them
+returns a network-policy block), so none of these values could be looked
+up or verified here; `gradle build` fails immediately on the placeholder
+plugin version, confirmed by running it.
+
+Once the versions are filled in, the first build downloads Minecraft
+1.21.11, Yarn mappings, and Fabric Loader/API — needs internet access, can
+take several minutes. The compiled mod jar lands in
+`build/libs/sword-pvp-trainer-1.0.0.jar`.
+
+**Not build-verified.** Beyond the placeholder versions above, the source
+itself (`DrawContext`-based HUD rendering, Java 21 target) was written and
+reviewed against known Fabric API patterns for the 1.20.2→1.21.x
+transition, but has not actually compiled anywhere yet. The riskiest single
+line is the `HudRenderCallback` registration in `PvpTrainerClient.java` —
+see the comment there for the `HudElementRegistry` fallback if Mojang's
+1.21.x HUD-layering rework removed it by 1.21.11.
 
 ## Installing
 
-1. Install [Fabric Loader](https://fabricmc.net/use/) for Minecraft 1.20.1.
-2. Download [Fabric API](https://modrinth.com/mod/fabric-api) for 1.20.1
+1. Install [Fabric Loader](https://fabricmc.net/use/) for Minecraft 1.21.11.
+2. Download [Fabric API](https://modrinth.com/mod/fabric-api) for 1.21.11
    into your `mods` folder — required, this mod depends on it.
 3. Drop `sword-pvp-trainer-1.0.0.jar` into the same `mods` folder.
-4. Launch the 1.20.1 Fabric profile.
+4. Launch the 1.21.11 Fabric profile.
 
 ## Targeting a different Minecraft version
 
 Bump `minecraft_version`, `yarn_mappings`, `loader_version`, and
-`fabric_version` in `gradle.properties` to match your target version (check
+`fabric_version` in `gradle.properties`, and the `fabric-loom` plugin
+version in `build.gradle`, to match your target (check
 [Fabric's version list](https://fabricmc.net/develop/) for compatible
-combinations), then rebuild. The rendering APIs used here
-(`HudRenderCallback`, `WorldRenderEvents`) are stable across recent 1.20.x
-releases, but HUD rendering changed from `MatrixStack` to `DrawContext`
-starting around 1.20.2 — `CooldownOverlay.render` would need updating to
-match if you target 1.20.2+.
+combinations), then rebuild. `WorldRenderEvents` (used by the hitbox
+visualizer) has been stable across recent versions; `HudRenderCallback`
+(the cooldown overlay) is the API most likely to have moved — see the note
+above.

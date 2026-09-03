@@ -33,6 +33,15 @@ public final class PvpTrainerClient implements ClientModInitializer {
                 "category.sword-pvp-trainer"
         ));
 
+        // Mojang reworked InGameHud into a layered-drawer system partway
+        // through the 1.21.x cycle; Fabric API added HudElementRegistry
+        // around that point as the new way to add HUD layers. HudRenderCallback
+        // (used here) may be deprecated-but-functional or fully removed by
+        // 1.21.11 — this could not be verified from this environment (all
+        // fabricmc.net/modrinth.com domains are network-blocked here). If
+        // this line fails to compile, switch to:
+        //   HudElementRegistry.addLast(Identifier.of("sword-pvp-trainer",
+        //       "cooldown_overlay"), CooldownOverlay::render);
         HudRenderCallback.EVENT.register(CooldownOverlay::render);
         WorldRenderEvents.AFTER_ENTITIES.register(HitboxRenderer::render);
 
