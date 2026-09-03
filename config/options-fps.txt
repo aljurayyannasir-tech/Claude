@@ -1,0 +1,24 @@
+# Reference FPS-oriented Minecraft video/performance settings.
+# Values shown here match what scripts/apply_options.py writes.
+# These are the option.txt *keys* Minecraft itself uses (not all of the
+# file — apply_options.py only touches the keys listed below and leaves
+# everything else in your existing options.txt untouched).
+
+renderDistance:10
+simulationDistance:8
+maxFps:260
+enableVsync:false
+fboEnable:true
+graphicsMode:1
+ao:1
+entityShadows:false
+particles:1
+biomeBlendRadius:2
+guiScale:2
+mipmapLevels:4
+prioritizeChunkUpdates:0
+renderClouds:false
+fancyGraphics:false
+fullscreen:true
+smoothLighting:false
+darkMojangStudiosBackground:false
