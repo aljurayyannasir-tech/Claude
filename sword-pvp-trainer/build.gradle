@@ -1,8 +1,8 @@
 plugins {
-    // Loom 1.6 predates 1.21.11 support; bump to whatever's current at
-    // https://fabricmc.net/develop/ (not reachable from this environment
-    // to verify — see gradle.properties).
-    id 'fabric-loom' version '1.9-SNAPSHOT'
+    // Plugin id verified against FabricMC/fabric-example-mod's own
+    // build.gradle (branch "1.21.11") — the id changed from the older
+    // "fabric-loom" to this namespaced form at some point after 1.20.1.
+    id 'net.fabricmc.fabric-loom-remap' version "${loom_version}"
 }
 
 version = project.mod_version
@@ -12,12 +12,16 @@ base {
     archivesName = project.archives_base_name
 }
 
-repositories {
-    maven { url = 'https://maven.fabricmc.net/' }
-}
-
 dependencies {
     minecraft "com.mojang:minecraft:${project.minecraft_version}"
+    // Using Yarn mappings (still fully supported by Loom) rather than the
+    // newer loom.officialMojangMappings() the current upstream template
+    // defaults to — official mappings rename effectively every vanilla
+    // class/method used below (e.g. PlayerEntity -> Player, MinecraftClient
+    // -> Minecraft, DrawContext -> GuiGraphics), which this mod's code was
+    // not written against and couldn't be verified against from this
+    // environment. Yarn keeps the class/method names used throughout this
+    // codebase valid.
     mappings "net.fabricmc:yarn:${project.yarn_mappings}:v2"
     modImplementation "net.fabricmc:fabric-loader:${project.loader_version}"
     modImplementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_version}"
@@ -40,4 +44,10 @@ java {
     sourceCompatibility = JavaVersion.VERSION_21
     targetCompatibility = JavaVersion.VERSION_21
     withSourcesJar()
+}
+
+jar {
+    from("LICENSE") {
+        rename { "${it}_${project.base.archivesName.get()}" }
+    }
 }

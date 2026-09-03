@@ -31,43 +31,48 @@ own singleplayer/LAN world** — most servers that allow client-side mods at
 all still disallow hitbox reveals specifically, separate from cooldown
 overlays which are usually fine (they mirror the vanilla attack indicator).
 
-## Building — you must fill in version numbers first
+## Building
 
 Requires JDK 21 and Gradle 8.x. This project doesn't ship a Gradle wrapper
 binary — either use a system Gradle install, or generate one yourself:
 
 ```bash
 gradle wrapper --gradle-version 8.8   # one-time, if you don't have Gradle installed globally
+./gradlew build
 ```
 
-**Before running `./gradlew build`**, open `gradle.properties` and
-`build.gradle` and replace every `REPLACE_ME` placeholder:
+The first build downloads Minecraft 1.21.11, Yarn mappings, and Fabric
+Loader/API — needs internet access, can take several minutes. The compiled
+mod jar lands in `build/libs/sword-pvp-trainer-1.0.0.jar`.
 
-- `gradle.properties`: `yarn_mappings`, `loader_version`, `fabric_version`
-- `build.gradle`: the `fabric-loom` plugin version (currently a guess:
-  `1.9-SNAPSHOT`)
+**Version numbers are verified, not guessed** — `gradle.properties` and the
+`fabric-loom` plugin id/version in `build.gradle` were cross-checked against
+FabricMC's own `fabric-example-mod` repo's `1.21.11` branch on GitHub
+(loader `0.19.3`, Fabric API `0.141.6+1.21.11`, Loom plugin id
+`net.fabricmc.fabric-loom-remap` version `1.17-SNAPSHOT` — note the plugin
+id itself changed from the older `fabric-loom`) and FabricMC/yarn's tag
+list for the latest published `1.21.11` mapping build (`build.6`). This
+project keeps Yarn mappings rather than the newer
+`loom.officialMojangMappings()` the current upstream template defaults to,
+since official mappings rename essentially every vanilla class/method used
+below (`PlayerEntity`→`Player`, `MinecraftClient`→`Minecraft`,
+`DrawContext`→`GuiGraphics`, etc.) and this codebase wasn't written or
+checked against those names.
 
-Get the real values from https://fabricmc.net/develop/ (select Minecraft
-1.21.11) and the [Fabric API releases](https://modrinth.com/mod/fabric-api)
-page for a build tagged 1.21.11. **This environment blocks
-`fabricmc.net`, `meta.fabricmc.net`, and `modrinth.com` outright** (not
-just the Maven artifact host — a straight `curl`/WebFetch to any of them
-returns a network-policy block), so none of these values could be looked
-up or verified here; `gradle build` fails immediately on the placeholder
-plugin version, confirmed by running it.
-
-Once the versions are filled in, the first build downloads Minecraft
-1.21.11, Yarn mappings, and Fabric Loader/API — needs internet access, can
-take several minutes. The compiled mod jar lands in
-`build/libs/sword-pvp-trainer-1.0.0.jar`.
-
-**Not build-verified.** Beyond the placeholder versions above, the source
-itself (`DrawContext`-based HUD rendering, Java 21 target) was written and
-reviewed against known Fabric API patterns for the 1.20.2→1.21.x
-transition, but has not actually compiled anywhere yet. The riskiest single
-line is the `HudRenderCallback` registration in `PvpTrainerClient.java` —
-see the comment there for the `HudElementRegistry` fallback if Mojang's
-1.21.x HUD-layering rework removed it by 1.21.11.
+**Still not build-verified end-to-end.** `gradle build` was actually run
+against these exact version numbers here and got as far as confirming the
+plugin id/version resolve correctly (Gradle searched Maven Central and the
+Gradle Plugin Portal and correctly did *not* find them there — Fabric's
+plugin is snapshot-only and lives solely on `maven.fabricmc.net`) before
+failing, because this development sandbox's network policy blocks that
+host outright (confirmed via a fresh 403 in the egress proxy's own log at
+the exact moment of that attempt) — not something fixable from inside this
+environment. On a normal machine with regular internet access this should
+resolve fine. The one thing that couldn't be checked at all — because it
+only surfaces once compilation actually runs — is the `HudRenderCallback`
+registration in `PvpTrainerClient.java`; see the comment there for the
+`HudElementRegistry` fallback if Mojang's 1.21.x HUD-layering rework
+removed it by 1.21.11.
 
 ## Installing
 
@@ -80,9 +85,10 @@ see the comment there for the `HudElementRegistry` fallback if Mojang's
 ## Targeting a different Minecraft version
 
 Bump `minecraft_version`, `yarn_mappings`, `loader_version`, and
-`fabric_version` in `gradle.properties`, and the `fabric-loom` plugin
-version in `build.gradle`, to match your target (check
-[Fabric's version list](https://fabricmc.net/develop/) for compatible
+`fabric_version` in `gradle.properties`, and the `net.fabricmc.fabric-loom-remap`
+plugin version in `build.gradle`, to match your target (check
+[Fabric's version list](https://fabricmc.net/develop/), or the
+`fabric-example-mod` GitHub repo's per-version branches, for compatible
 combinations), then rebuild. `WorldRenderEvents` (used by the hitbox
 visualizer) has been stable across recent versions; `HudRenderCallback`
 (the cooldown overlay) is the API most likely to have moved — see the note
