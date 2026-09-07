@@ -9,6 +9,7 @@ from typing import Optional
 
 from . import mc_api
 from .auth import MicrosoftMinecraftAuth
+from .links import namemc_url
 from .time_sync import SyncedClock
 
 log = logging.getLogger("name_sniper")
@@ -36,6 +37,11 @@ class NameSniper:
 
     # ------------------------------------------------------------------
     def run(self) -> bool:
+        log.info(
+            "Target: '%s' — NameMC: %s",
+            self.config.target_name,
+            namemc_url(self.config.target_name),
+        )
         log.info("Authenticating with Microsoft/Xbox/Minecraft...")
         mc_token = self.auth.get_minecraft_token()
         log.info("Authenticated.")
@@ -127,7 +133,12 @@ class NameSniper:
         for attempt in range(1, self.config.claim_attempts + 1):
             result = mc_api.claim_name(mc_token, name)
             if result.ok:
-                log.info("SUCCESS on attempt %d: claimed '%s'.", attempt, name)
+                log.info(
+                    "SUCCESS on attempt %d: claimed '%s'. Confirm at %s",
+                    attempt,
+                    name,
+                    namemc_url(name),
+                )
                 return True
 
             if result.status_code == 401:

@@ -19,6 +19,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from name_sniper import mc_api
 from name_sniper.auth import AuthError, MicrosoftMinecraftAuth
+from name_sniper.links import namemc_url
 from name_sniper.sniper import NameSniper, SniperConfig
 
 
@@ -102,6 +103,7 @@ def main() -> int:
             token = auth.get_minecraft_token()
             result = mc_api.check_name_available(token, config.target_name)
             print(result.body)
+            print(f"NameMC: {namemc_url(config.target_name)}")
             return 0
 
         sniper = NameSniper(config)
