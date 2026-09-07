@@ -1,0 +1,53 @@
+# Copy this file to config.yaml and fill in your own values.
+# config.yaml is gitignored so your client_id / target name never get committed.
+
+# Azure AD application (client) ID — see README "Setup" section for how to
+# register a free app. This is a public client id, not a secret.
+client_id: "YOUR-AZURE-APP-CLIENT-ID"
+
+# The exact name you want to claim (case as you want it to appear).
+target_name: "Foo"
+
+# Set ONE of the following two (not both) to schedule around a specific
+# time. Leave both blank to just poll continuously at far_poll_interval.
+
+# Option A: you already know/estimate the exact drop time (UTC, ISO-8601) —
+# e.g. from NameMC's "estimated to drop" date.
+drop_time_utc: "2026-09-10T15:00:00Z"
+
+# Option B: you know WHEN the current owner renamed away from this name
+# (visible in NameMC's cached name-history for the account, since Mojang's
+# own name-history API was retired in Sept 2022). Mojang holds a name for
+# at least `cooldown_days` (documented community-verified constant: 37)
+# after a rename before it's available again, so the tool computes
+# drop_time_utc = rename_detected_utc + cooldown_days for you.
+# rename_detected_utc: "2026-08-04T15:00:00Z"
+# cooldown_days: 37
+
+# How many seconds before drop_time_utc to switch from slow polling to
+# tight, high-frequency polling.
+pre_drop_window_seconds: 120
+
+# Mojang's hold is "at least" cooldown_days, not exact — if this many
+# seconds pass after drop_time_utc with no availability, stop hammering at
+# near_poll_interval and fall back to far_poll_interval instead.
+post_drop_grace_seconds: 900
+
+# Seconds between availability checks while far from the drop time
+# (or the only interval used, in continuous-polling mode).
+far_poll_interval: 30
+
+# Seconds between availability checks inside the pre-drop window.
+near_poll_interval: 0.5
+
+# Once the name shows AVAILABLE, how many rename attempts to fire and
+# how long to wait between them.
+claim_attempts: 60
+claim_retry_delay: 0.1
+
+# Where to cache Microsoft/Xbox/Minecraft tokens between runs so you don't
+# have to re-auth every time (refreshed automatically while valid).
+token_cache_path: "token_cache.json"
+
+# Log file for a timestamped record of what happened.
+log_path: "sniper.log"
