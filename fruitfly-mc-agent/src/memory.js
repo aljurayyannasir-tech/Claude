@@ -3,6 +3,7 @@ import path from 'node:path';
 import { createBanditState } from './learning/bandit.js';
 import { createCityState } from './brain/city.js';
 import { createLessonsState } from './learning/lessons.js';
+import { createQState } from './learning/qlearning.js';
 
 const DEFAULT_PATH = path.join(process.cwd(), 'data', 'memory.json');
 
@@ -13,6 +14,7 @@ function freshMemory() {
     bandit: createBanditState(),
     city: createCityState(),
     lessons: createLessonsState(),
+    qlearning: createQState(), // FIGHT-vs-FLEE Q-table, see src/learning/qlearning.js
     stats: {
       sessionsPlayed: 0,
       totalDeaths: 0,
@@ -38,6 +40,7 @@ export function loadMemory(filePath = DEFAULT_PATH) {
       bandit: parsed.bandit || base.bandit,
       city: parsed.city || base.city,
       lessons: { ...base.lessons, ...(parsed.lessons || {}) },
+      qlearning: parsed.qlearning || base.qlearning,
       stats: { ...base.stats, ...(parsed.stats || {}) },
     };
   } catch (err) {

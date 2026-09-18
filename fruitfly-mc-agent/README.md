@@ -95,6 +95,7 @@ src/
     bandit.js          epsilon-greedy bandit for non-critical choices (explore direction, blueprint order)
     reward.js           hand-shaped reward function for logging + bandit updates
     lessons.js           death-cause classification + threshold retuning -- the "learn from mistakes" layer
+    qlearning.js          real tabular Q-learning (TD updates) for the FIGHT-vs-FLEE decision, once hard safety rules already ruled out anything unsafe
   utils/
     blueprints.js      loads src/blueprints/*.json into flat block lists
     placement.js        places a blueprint block-by-block against solid neighbors
@@ -110,15 +111,19 @@ src/
 The decision logic (`stateMachine.js`) is deliberately pure and
 side-effect-free so it can be unit tested without a live connection —
 `test/stateMachine.test.js` exercises every branch of the priority
-ordering. Survival-critical decisions (flee/fight/eat/shelter) are fully
-deterministic; the bandit only influences things like which direction to
-explore or which city blueprint gets built next, so a cold-started (no
-learned data yet) bot still behaves sensibly.
+ordering. Survival-critical decisions (fleeing danger, fleeing a
+known-lethal mob, eating, sheltering) are fully deterministic and never
+delegated to a learned component; within the *remaining* safe choices, a
+bandit picks explore direction/build order and a real Q-learning layer
+picks FIGHT vs FLEE (see [Reinforcement learning](#reinforcement-learning)
+below) — so a cold-started (no learned data yet) bot still behaves
+sensibly on every axis.
 
 ### Priority order each tick
 
 1. Immediate danger (fire/lava, scanned with a learned safety margin) → escape
-2. Hostile nearby → flee (low health, unarmed, or a mob type learned to be dangerous) or fight
+2. Hostile nearby → hard rules force flee (low health, unarmed, or a mob
+   type learned to be dangerous); otherwise Q-learning picks FIGHT or FLEE
 3. Critically hungry (starvation-damage territory) → eat, harvest, or hunt
 4. Hungry past the learned buffer → eat if food is on hand
 5. Nightfall → emergency shelter / return to shelter / sleep
@@ -175,18 +180,73 @@ statistics. Three things persist across restarts in `data/memory.json`:
    action, that bias future *non-critical* choices (explore direction,
    which city blueprint to prioritize when several are viable). This
    layer never touches survival-critical decisions.
-3. **Lifetime stats** — deaths (now broken down by cause), best survival
+3. **Q-table** (`src/learning/qlearning.js`) — see
+   [Reinforcement learning](#reinforcement-learning) below.
+4. **Lifetime stats** — deaths (now broken down by cause), best survival
    duration, milestone counts (first crafting table, first stone tools,
    first iron tools, etc.) — useful for tracking whether the agent is
    actually getting better run over run.
 
-This is honest online learning at a small scale — hand-written retuning
-rules over a hand-written policy, not a trained neural network. It *will*
-actually get safer over repeated deaths (higher flee thresholds, bigger
-food buffers, learned mob avoidance), but it won't discover strategies
-outside what the rule-based policy already knows how to do. See the
-roadmap below for what turning this into something that can learn novel
-strategies would take.
+Lessons and the bandit are honest online learning at a small scale — a
+hand-written retuning rule and a running average, not anything that
+searches a policy space. The Q-learning layer below is where actual
+reinforcement learning lives in this codebase.
+
+### Reinforcement learning
+
+This is real RL, not a rebrand of the bandit above: `src/learning/qlearning.js`
+implements tabular Q-learning — epsilon-greedy action selection over a
+discretized state space, updated with the standard one-step temporal-difference
+(Bellman) rule:
+
+```
+Q(s,a) <- Q(s,a) + alpha * (reward + gamma * max_a' Q(s',a') - Q(s,a))
+```
+
+**Where it's scoped, and why.** Per how this was built (a deliberate,
+discussed choice — RL picks among *safe* options only, hard rules stay
+absolute), it governs exactly one decision: **FIGHT vs FLEE**, and only
+once `stateMachine.js`'s hard rules have already ruled out anything
+unsafe (critical health, unarmed, a mob type with 2+ prior losses to it).
+Nothing about this lets the RL layer talk the bot into a fight it
+shouldn't take — it only gets a vote once the hard-coded safety net has
+already said "either choice is survivable here."
+
+- **State**: `(healthBucket, toolTier, hostileCategory)` — e.g.
+  `high|iron|easy` — collapsing the continuous/combinatorial real state
+  into a small discrete table (see `healthBucket`/`classifyHostileCategory`
+  in `qlearning.js`).
+- **Actions**: `FIGHT`, `FLEE`.
+- **Reward** (computed in `src/index.js`'s `resolvePendingQUpdate`, one
+  tick after the decision, once the outcome is visible): the health lost
+  or gained since the decision, plus a bonus if the encounter resolved
+  (mob defeated while fighting, or successfully disengaged while
+  fleeing), or a firm −20 if FruitFly died before the next tick — this is
+  what stops the death-during-combat case from being scored as a
+  misleadingly positive health jump on respawn.
+- **Bootstrapping**: if the same hostile is still engaged next tick, the
+  update bootstraps off `max(Q(s', FIGHT), Q(s', FLEE))` for the
+  resulting state; if the encounter ended, it's treated as terminal (no
+  future value to add).
+- **Persistence**: the whole Q-table lives in `memory.json` under
+  `qlearning` and survives restarts, so it keeps improving across
+  sessions like everything else here.
+
+`test/qlearning.test.js` covers the bucketing, the epsilon-greedy
+selection (both the exploit and explore branches), and the Bellman update
+arithmetic directly; `test/stateMachine.test.js` covers that the hard
+safety rules still win even when the Q-table strongly prefers the unsafe
+option.
+
+**Honest limits.** A 3-dimensional discretized table with two actions is
+about as small as real RL gets — it's genuinely temporal-difference
+learning, not a rebrand of the bandit, but it's also not going to
+discover novel combat tactics; it can only learn *when* fighting a
+category of mob at a tool/health level has paid off versus not, within
+the two moves it's given. Scaling this to more actions, a richer state
+(position, mob distance, armor), or a function approximator (a small
+neural net instead of a table) instead of hand-picked buckets is real
+follow-on work, not something already done here.
 
 ### Always armed, always fed
 
@@ -221,11 +281,13 @@ python3 scripts/analyze_dataset.py --export training_data.jsonl
 npm test
 ```
 
-49 unit tests cover the state machine's full decision priority ordering
-(including tuning-driven thresholds and weapon/food maintenance), the
-death-cause classification and threshold-retuning in `lessons.js`, the
-bandit's exploration/exploitation behavior, the city planner's spiral
-allocation and persistence, and blueprint loading/validation. These don't
+60 unit tests cover the state machine's full decision priority ordering
+(including tuning-driven thresholds, weapon/food maintenance, and the
+Q-learning combat delegation), the death-cause classification and
+threshold-retuning in `lessons.js`, the Q-learning bucketing/selection/TD
+update math in `qlearning.js`, the bandit's exploration/exploitation
+behavior, the city planner's spiral allocation and persistence, and
+blueprint loading/validation. These don't
 require a Minecraft server — only the mineflayer-facing code
 (`executors.js`, `perception.js`, `index.js`) needs a live connection to
 exercise, since it's a thin, deliberately separated layer over the tested

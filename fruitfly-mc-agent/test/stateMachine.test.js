@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { decideNextAction } from '../src/brain/stateMachine.js';
 import { createLessonsState, getTuning } from '../src/learning/lessons.js';
+import { createQState, updateQ, buildCombatStateKey } from '../src/learning/qlearning.js';
 
 function baseState(overrides = {}) {
   return {
@@ -34,8 +35,8 @@ function baseState(overrides = {}) {
 
 const tuning = getTuning(createLessonsState());
 
-function decide(overrides = {}, customTuning = tuning) {
-  return decideNextAction(baseState(overrides), customTuning);
+function decide(overrides = {}, customTuning = tuning, qLearning = undefined) {
+  return decideNextAction(baseState(overrides), customTuning, qLearning);
 }
 
 test('immediate danger overrides everything else', () => {
@@ -71,6 +72,37 @@ test('still fights other mob types the learned avoidance does not cover', () => 
   });
   const a = decide({ hostileNearby: true, hasWeapon: true, health: 20, hostileType: 'zombie' }, learned);
   assert.equal(a.type, 'FIGHT');
+});
+
+test('Q-learning chooses FLEE over the FIGHT default once it has learned FLEE pays off better', () => {
+  const q = createQState();
+  const stateKey = buildCombatStateKey({ healthBucket: 'high', toolTier: 'iron', hostileCategory: 'easy' });
+  updateQ(q, stateKey, 'FIGHT', -10, null);
+  updateQ(q, stateKey, 'FLEE', 10, null);
+  const a = decide(
+    { hostileNearby: true, hasWeapon: true, health: 20, toolTier: 'iron', hostileType: 'zombie' },
+    tuning,
+    { qState: q, rng: () => 0.99 }, // never explores, so this reads as pure exploitation
+  );
+  assert.equal(a.type, 'FLEE');
+  assert.match(a.reason, /Q-learning favors disengaging/);
+  assert.equal(a.params.qStateKey, stateKey);
+});
+
+test('Q-learning combat choice is still overridden by the hard learned-avoid rule', () => {
+  const q = createQState();
+  const stateKey = buildCombatStateKey({ healthBucket: 'high', toolTier: 'iron', hostileCategory: 'hard' });
+  updateQ(q, stateKey, 'FIGHT', 100, null); // Q strongly prefers FIGHT...
+  updateQ(q, stateKey, 'FLEE', -100, null);
+  const learned = getTuning({ ...createLessonsState(), lossesByHostile: { creeper: 2 } });
+  const a = decide(
+    { hostileNearby: true, hasWeapon: true, health: 20, hostileType: 'creeper' },
+    learned,
+    { qState: q, rng: () => 0.99 },
+  );
+  // ...but two prior losses to this specific mob is a hard rule the RL layer never gets to override.
+  assert.equal(a.type, 'FLEE');
+  assert.match(a.reason, /learned to avoid creeper/);
 });
 
 test('a raised flee-health threshold (learned from a past combat death) triggers flight sooner', () => {

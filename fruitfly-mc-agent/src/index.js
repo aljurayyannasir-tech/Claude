@@ -13,6 +13,7 @@ import { markPlotComplete } from './brain/city.js';
 import { createExecutors } from './executors.js';
 import { computeReward } from './learning/reward.js';
 import { getTuning, classifyDeathCause, applyDeathLesson } from './learning/lessons.js';
+import { updateQ, buildCombatStateKey, healthBucket, classifyHostileCategory } from './learning/qlearning.js';
 import * as bandit from './learning/bandit.js';
 
 const { createBot } = mineflayerPkg;
@@ -44,10 +45,44 @@ bot.loadPlugin(autoEatLoader);
 let running = false;
 let ticksThisLife = 0;
 let saveCounter = 0;
+let deathCount = 0;
 let lastState = null; // most recent AgentState snapshot, used to infer cause of death
+let pendingQUpdate = null; // a Q-learning-driven FIGHT/FLEE awaiting its outcome next tick
 
 function persist() {
   saveMemory(memory, config.memoryPath || DEFAULT_PATH);
+}
+
+/**
+ * Resolve last tick's Q-learning combat decision now that `state` shows
+ * its outcome (one-step TD lookahead: this tick's state is exactly "s'"
+ * for the action chosen last tick). Dying between the two ticks is
+ * scored as a hard penalty rather than the misleading health jump a
+ * respawn would otherwise produce.
+ */
+function resolvePendingQUpdate(state) {
+  const p = pendingQUpdate;
+  pendingQUpdate = null;
+  if (!p) return;
+
+  if (deathCount > p.deathCountAtDecision) {
+    updateQ(memory.qlearning, p.stateKey, p.action, -20, null);
+    return;
+  }
+
+  const healthDelta = state.health - p.healthBefore;
+  const hostileResolved = !state.hostileNearby || state.hostileType !== p.hostileType;
+  const reward = healthDelta
+    + (hostileResolved && p.action === 'FIGHT' ? 5 : 0)
+    + (hostileResolved && p.action === 'FLEE' ? 1 : 0);
+  const nextStateKey = hostileResolved
+    ? null
+    : buildCombatStateKey({
+        healthBucket: healthBucket(state.health),
+        toolTier: state.toolTier,
+        hostileCategory: classifyHostileCategory(state.hostileType),
+      });
+  updateQ(memory.qlearning, p.stateKey, p.action, reward, nextStateKey);
 }
 
 async function tick() {
@@ -62,13 +97,29 @@ async function tick() {
   try {
     const tuning = getTuning(memory.lessons);
     state = buildAgentState(bot, memory, tuning);
+
+    // See what happened as a result of last tick's Q-learning combat
+    // decision (if any) before making a new one.
+    resolvePendingQUpdate(state);
+
     lastState = state; // snapshot kept for death-cause inference, see bot.on('death')
-    action = decideNextAction(state, tuning);
+    const qLearning = { qState: memory.qlearning, rng: Math.random };
+    action = decideNextAction(state, tuning, qLearning);
     const executor = executors[action.type] || executors.IDLE;
     result = (await executor(bot, memory, action, state)) || { success: false };
 
     if (action.type === 'BUILD_CITY_STRUCTURE' && result.plotComplete) {
       markPlotComplete(memory.city, action.params.plot.index);
+    }
+
+    if ((action.type === 'FIGHT' || action.type === 'FLEE') && action.params?.qStateKey) {
+      pendingQUpdate = {
+        stateKey: action.params.qStateKey,
+        action: action.type,
+        hostileType: action.params.hostileType,
+        healthBefore: state.health,
+        deathCountAtDecision: deathCount,
+      };
     }
   } catch (err) {
     error = err.message;
@@ -140,6 +191,7 @@ bot.on('death', () => {
   const cause = classifyDeathCause(lastState);
   const hostileType = cause === 'combat' ? lastState?.hostileType : null;
   const changes = applyDeathLesson(memory.lessons, cause, hostileType);
+  deathCount += 1; // lets resolvePendingQUpdate tell a real death apart from a respawn's health jump
 
   console.log(`[fruitfly] died after ${ticksThisLife} ticks this life -- cause: ${cause}`, changes);
   recordDeath(memory, ticksThisLife);

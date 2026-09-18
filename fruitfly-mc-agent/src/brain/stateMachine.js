@@ -11,6 +11,7 @@
 // what killed the agent before.
 
 import { defaultTuning } from '../learning/lessons.js';
+import { chooseAction, buildCombatStateKey, healthBucket, classifyHostileCategory, createQState } from '../learning/qlearning.js';
 
 /**
  * @typedef {Object} AgentState
@@ -46,9 +47,15 @@ const EMERGENCY_HUNGER_THRESHOLD = 6; // starvation damage territory, always act
 /**
  * @param {AgentState} s
  * @param {ReturnType<import('../learning/lessons.js').getTuning>} tuning
+ * @param {{qState: Object, rng?: () => number}} qLearning Q-table (see
+ *   src/learning/qlearning.js) used ONLY to decide FIGHT vs FLEE once the
+ *   hard safety rules below have already ruled out anything unsafe.
+ *   Defaults to a fresh, empty table with a non-exploring rng so callers
+ *   that don't care about combat learning (most tests) get deterministic,
+ *   backward-compatible behavior (ties resolve to FIGHT).
  * @returns {{type: string, params?: Object, reason: string}}
  */
-export function decideNextAction(s, tuning = defaultTuning) {
+export function decideNextAction(s, tuning = defaultTuning, qLearning = { qState: createQState(), rng: () => 1 }) {
   // 1. Immediate survival-threatening danger overrides everything.
   if (s.onFire || s.inLavaOrDanger) {
     return { type: 'ESCAPE_DANGER', reason: 'on fire or in immediate environmental danger' };
@@ -68,7 +75,24 @@ export function decideNextAction(s, tuning = defaultTuning) {
           : 'unarmed, fleeing hostile';
       return { type: 'FLEE', reason };
     }
-    return { type: 'FIGHT', reason: 'armed and healthy, engaging nearby hostile' };
+
+    // Everything genuinely unsafe has already been ruled out above (this
+    // is what "RL picks among safe options only" means in practice) --
+    // within that, let Q-learning decide whether engaging this category
+    // of mob at this health/tool level has paid off before.
+    const stateKey = buildCombatStateKey({
+      healthBucket: healthBucket(s.health),
+      toolTier: s.toolTier,
+      hostileCategory: classifyHostileCategory(s.hostileType),
+    });
+    const chosen = chooseAction(qLearning.qState, stateKey, ['FIGHT', 'FLEE'], undefined, qLearning.rng);
+    return {
+      type: chosen,
+      params: { qStateKey: stateKey, hostileType: s.hostileType },
+      reason: chosen === 'FIGHT'
+        ? `armed and healthy, Q-learning favors engaging ${s.hostileType || 'this hostile'}`
+        : `armed and healthy, Q-learning favors disengaging from ${s.hostileType || 'this hostile'} based on past outcomes`,
+    };
   }
 
   // 3. Emergency hunger: starvation damage territory, non-negotiable.
