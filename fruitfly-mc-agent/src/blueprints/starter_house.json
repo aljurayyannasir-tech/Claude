@@ -1,0 +1,21 @@
+{
+  "name": "starter_house",
+  "kind": "house",
+  "width": 5,
+  "depth": 5,
+  "height": 4,
+  "footprintFree": true,
+  "legend": {
+    "#": "oak_planks",
+    ".": "air",
+    "D": "oak_door",
+    "W": "glass_pane"
+  },
+  "layers": [
+    ["#####", "#####", "#####", "#####", "#####"],
+    ["#####", "#...#", "#...#", "#...#", "##D##"],
+    ["#####", "#...#", "W...W", "#...#", "#####"],
+    ["#####", "#####", "#####", "#####", "#####"]
+  ],
+  "notes": "5x5 footprint, y0=floor, y1-y2=walls with door on south face (row index 4) and side windows, y3=flat roof. Rows go north(0)->south(depth-1), each row string spans west(0)->east(width-1)."
+}

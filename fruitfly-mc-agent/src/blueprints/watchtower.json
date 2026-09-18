@@ -1,0 +1,24 @@
+{
+  "name": "watchtower",
+  "kind": "watchtower",
+  "width": 3,
+  "depth": 3,
+  "height": 8,
+  "footprintFree": true,
+  "legend": {
+    "#": "cobblestone",
+    ".": "air",
+    "D": "oak_door"
+  },
+  "layers": [
+    ["###", "###", "###"],
+    ["###", "#.#", "#D#"],
+    ["###", "#.#", "###"],
+    ["###", "#.#", "###"],
+    ["###", "#.#", "###"],
+    ["###", "#.#", "###"],
+    ["###", "#.#", "###"],
+    ["###", "###", "###"]
+  ],
+  "notes": "3x3 tall lookout tower with a 1x1 climbable interior shaft (executor places ladders on the interior air column) and a capped roof at the top for a vantage point over the city."
+}

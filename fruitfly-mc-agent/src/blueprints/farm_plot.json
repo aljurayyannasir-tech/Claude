@@ -1,0 +1,35 @@
+{
+  "name": "farm_plot",
+  "kind": "farm",
+  "width": 7,
+  "depth": 7,
+  "height": 2,
+  "footprintFree": true,
+  "legend": {
+    "F": "farmland",
+    "~": "water",
+    ".": "air",
+    "C": "wheat"
+  },
+  "layers": [
+    [
+      "FFFFFFF",
+      "FFFFFFF",
+      "FFFFFFF",
+      "FFF~FFF",
+      "FFFFFFF",
+      "FFFFFFF",
+      "FFFFFFF"
+    ],
+    [
+      "CCCCCCC",
+      "CCCCCCC",
+      "CCCCCCC",
+      "CCC.CCC",
+      "CCCCCCC",
+      "CCCCCCC",
+      "CCCCCCC"
+    ]
+  ],
+  "notes": "7x7 farmland irrigated by one central water source (Minecraft farmland stays hydrated within 4 blocks). Layer 1 plants wheat seeds on every farmland cell except the water tile itself. The executor re-plants any cell that reports as air after a harvest."
+}

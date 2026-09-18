@@ -1,0 +1,22 @@
+{
+  "name": "warehouse",
+  "kind": "warehouse",
+  "width": 7,
+  "depth": 9,
+  "height": 5,
+  "footprintFree": true,
+  "legend": {
+    "#": "cobblestone",
+    ".": "air",
+    "D": "oak_door",
+    "W": "glass_pane"
+  },
+  "layers": [
+    ["#######", "#######", "#######", "#######", "#######", "#######", "#######", "#######", "#######"],
+    ["#######", "#.....#", "#.....#", "#.....#", "#.....#", "#.....#", "#.....#", "#.....#", "###D###"],
+    ["#######", "#.....#", "W.....W", "#.....#", "#.....#", "#.....#", "W.....W", "#.....#", "#######"],
+    ["#######", "#.....#", "#.....#", "#.....#", "#.....#", "#.....#", "#.....#", "#.....#", "#######"],
+    ["#######", "#######", "#######", "#######", "#######", "#######", "#######", "#######", "#######"]
+  ],
+  "notes": "7x9 cobblestone storage building, larger than the starter house, part of the city expansion set. Door on the south face; the executor places chests inside once it has spare inventory space to dedicate as storage."
+}
