@@ -2,6 +2,7 @@ import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { createBanditState } from './learning/bandit.js';
 import { createCityState } from './brain/city.js';
+import { createLessonsState } from './learning/lessons.js';
 
 const DEFAULT_PATH = path.join(process.cwd(), 'data', 'memory.json');
 
@@ -11,6 +12,7 @@ function freshMemory() {
     createdAt: new Date().toISOString(),
     bandit: createBanditState(),
     city: createCityState(),
+    lessons: createLessonsState(),
     stats: {
       sessionsPlayed: 0,
       totalDeaths: 0,
@@ -35,6 +37,7 @@ export function loadMemory(filePath = DEFAULT_PATH) {
       ...parsed,
       bandit: parsed.bandit || base.bandit,
       city: parsed.city || base.city,
+      lessons: { ...base.lessons, ...(parsed.lessons || {}) },
       stats: { ...base.stats, ...(parsed.stats || {}) },
     };
   } catch (err) {

@@ -12,6 +12,7 @@ import { decideNextAction } from './brain/stateMachine.js';
 import { markPlotComplete } from './brain/city.js';
 import { createExecutors } from './executors.js';
 import { computeReward } from './learning/reward.js';
+import { getTuning, classifyDeathCause, applyDeathLesson } from './learning/lessons.js';
 import * as bandit from './learning/bandit.js';
 
 const { createBot } = mineflayerPkg;
@@ -43,6 +44,7 @@ bot.loadPlugin(autoEatLoader);
 let running = false;
 let ticksThisLife = 0;
 let saveCounter = 0;
+let lastState = null; // most recent AgentState snapshot, used to infer cause of death
 
 function persist() {
   saveMemory(memory, config.memoryPath || DEFAULT_PATH);
@@ -58,8 +60,10 @@ async function tick() {
   let error = null;
 
   try {
-    state = buildAgentState(bot, memory);
-    action = decideNextAction(state);
+    const tuning = getTuning(memory.lessons);
+    state = buildAgentState(bot, memory, tuning);
+    lastState = state; // snapshot kept for death-cause inference, see bot.on('death')
+    action = decideNextAction(state, tuning);
     const executor = executors[action.type] || executors.IDLE;
     result = (await executor(bot, memory, action, state)) || { success: false };
 
@@ -83,8 +87,11 @@ async function tick() {
       state: state && {
         health: state.health,
         food: state.food,
+        foodItemCount: state.foodItemCount,
+        hasWeapon: state.hasWeapon,
         isNight: state.isNight,
         hostileNearby: state.hostileNearby,
+        hostileType: state.hostileType,
         toolTier: state.toolTier,
         hasShelter: state.hasShelter,
         hasFarm: state.hasFarm,
@@ -126,8 +133,28 @@ bot.once('spawn', () => {
 });
 
 bot.on('death', () => {
-  console.log(`[fruitfly] died after ${ticksThisLife} ticks this life`);
+  // mineflayer's death event carries no cause -- infer it from the last
+  // AgentState snapshot taken before it fired, and retune the survival
+  // thresholds in stateMachine.js accordingly. This is the actual
+  // "learn from its mistakes" mechanism: see src/learning/lessons.js.
+  const cause = classifyDeathCause(lastState);
+  const hostileType = cause === 'combat' ? lastState?.hostileType : null;
+  const changes = applyDeathLesson(memory.lessons, cause, hostileType);
+
+  console.log(`[fruitfly] died after ${ticksThisLife} ticks this life -- cause: ${cause}`, changes);
   recordDeath(memory, ticksThisLife);
+
+  logger.log({
+    state: lastState && {
+      health: lastState.health,
+      food: lastState.food,
+      hostileType: lastState.hostileType,
+    },
+    action: { type: 'DEATH', params: { cause, hostileType } },
+    reason: `died: ${cause}`,
+    reward: computeReward({ died: true }),
+  });
+
   ticksThisLife = 0;
   persist();
 });

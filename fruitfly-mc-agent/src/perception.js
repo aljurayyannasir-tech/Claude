@@ -1,9 +1,14 @@
 import { Vec3 } from 'vec3';
 import { loadBlueprint } from './utils/blueprints.js';
 import { getCityPlan } from './brain/city.js';
-import { inventoryCounts, detectToolTier, hasAnyFood, hasAnyWeapon, isHostile } from './utils/inventory.js';
+import {
+  inventoryCounts, detectToolTier, hasAnyFood, hasAnyWeapon, isHostile, isPassiveHuntable,
+  totalFoodUnits, hasRawMeat,
+} from './utils/inventory.js';
+import { defaultTuning } from './learning/lessons.js';
 
 const HOSTILE_SCAN_RADIUS = 16;
+const PASSIVE_SCAN_RADIUS = 20;
 const DANGEROUS_BLOCKS = new Set(['lava', 'flowing_lava', 'fire']);
 
 function nearestHostile(bot) {
@@ -23,12 +28,43 @@ function nearestHostile(bot) {
   return null;
 }
 
-function isInImmediateDanger(bot) {
+function nearestPassive(bot) {
+  let closest = null;
+  let closestDist = Infinity;
+  for (const entity of Object.values(bot.entities)) {
+    if (!isPassiveHuntable(entity)) continue;
+    const dist = entity.position.distanceTo(bot.entity.position);
+    if (dist < closestDist) {
+      closestDist = dist;
+      closest = entity;
+    }
+  }
+  if (closest && closestDist <= PASSIVE_SCAN_RADIUS) {
+    return { entity: closest, distance: closestDist };
+  }
+  return null;
+}
+
+// tuning.hazardCaution (learned after burning to death) widens how far
+// out FruitFly checks for lava/fire, so it reacts before standing right
+// on top of it next time.
+function isInImmediateDanger(bot, hazardCaution = 0) {
   const pos = bot.entity.position.floored();
+  const margin = Math.min(hazardCaution, 3);
   try {
-    const feet = bot.blockAt(pos);
-    const below = bot.blockAt(pos.offset(0, -1, 0));
-    return [feet, below].some((b) => b && DANGEROUS_BLOCKS.has(b.name));
+    for (let dx = -margin; dx <= margin; dx++) {
+      for (let dz = -margin; dz <= margin; dz++) {
+        for (let dy = -1; dy <= 0; dy++) {
+          const block = bot.blockAt(pos.offset(dx, dy, dz));
+          if (block && DANGEROUS_BLOCKS.has(block.name)) {
+            // Immediate (dx=dz=0) danger always counts; wider margin only
+            // counts once caution has actually been learned.
+            if ((dx === 0 && dz === 0) || margin > 0) return true;
+          }
+        }
+      }
+    }
+    return false;
   } catch {
     return false;
   }
@@ -89,11 +125,13 @@ function isInsideShelter(bot, memory) {
  * Build the plain-object AgentState consumed by decideNextAction() from
  * live mineflayer bot state + persisted memory (which tracks where
  * buildings actually are, since re-scanning the whole world every tick
- * would be far too slow).
+ * would be far too slow). `tuning` (see src/learning/lessons.js) feeds
+ * back learned hazard caution into how widely danger is scanned for.
  */
-export function buildAgentState(bot, memory) {
+export function buildAgentState(bot, memory, tuning = defaultTuning) {
   const counts = inventoryCounts(bot);
   const hostile = nearestHostile(bot);
+  const passive = nearestPassive(bot);
   const farm = inspectFarm(bot, memory);
   const buildings = memory.buildings || {};
 
@@ -101,13 +139,18 @@ export function buildAgentState(bot, memory) {
     health: bot.health,
     food: bot.food,
     onFire: bot.entity && bot.entity.metadata ? Boolean(bot.entity.onFire) : false,
-    inLavaOrDanger: isInImmediateDanger(bot),
+    inLavaOrDanger: isInImmediateDanger(bot, tuning.hazardCaution),
     isNight: bot.time ? !bot.time.isDay : false,
     hostileNearby: Boolean(hostile),
     closestHostileDistance: hostile ? hostile.distance : Infinity,
     hostileEntity: hostile ? hostile.entity : null,
+    hostileType: hostile ? hostile.entity.name : null,
+    passiveNearby: Boolean(passive),
+    passiveEntity: passive ? passive.entity : null,
     hasWeapon: hasAnyWeapon(counts),
     hasFoodItem: hasAnyFood(counts),
+    foodItemCount: totalFoodUnits(counts),
+    hasRawMeat: hasRawMeat(counts),
     toolTier: detectToolTier(counts),
     hasCraftingTable: Boolean(buildings.craftingTable),
     hasFurnace: Boolean(buildings.furnace),

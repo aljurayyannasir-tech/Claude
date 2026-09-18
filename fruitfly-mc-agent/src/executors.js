@@ -3,7 +3,7 @@ import pkg from 'mineflayer-pathfinder';
 import { loadBlueprint } from './utils/blueprints.js';
 import { placeBlueprint, placeAt } from './utils/placement.js';
 import { recordMilestone } from './memory.js';
-import { isFoodItem } from './utils/inventory.js';
+import { isFoodItem, RAW_TO_COOKED } from './utils/inventory.js';
 
 const { goals } = pkg;
 
@@ -44,18 +44,21 @@ async function flee(bot, state) {
   return { success: true };
 }
 
-async function fight(bot, state) {
-  const hostile = state.hostileEntity;
-  if (!hostile) return { success: false };
-
+async function meleeEngage(bot, targetEntity, timeoutMs = 5000) {
   const weapon = bot.inventory.items().find((i) => i.name.endsWith('_sword')) ||
     bot.inventory.items().find((i) => i.name.endsWith('_axe'));
   if (weapon) await bot.equip(weapon, 'hand').catch(() => {});
 
-  const deadline = Date.now() + 5000;
+  const deadline = Date.now() + timeoutMs;
+  let lastKnownPos = targetEntity.position.clone();
+  let killed = false;
   while (Date.now() < deadline) {
-    const target = bot.entities[hostile.id];
-    if (!target || !target.isValid) break;
+    const target = bot.entities[targetEntity.id];
+    if (!target || !target.isValid) {
+      killed = true;
+      break;
+    }
+    lastKnownPos = target.position.clone();
     const dist = target.position.distanceTo(bot.entity.position);
     if (dist > 3) {
       await goNear(bot, target.position, 2);
@@ -65,7 +68,39 @@ async function fight(bot, state) {
       await new Promise((r) => setTimeout(r, 650));
     }
   }
+  return { killed, lastKnownPos };
+}
+
+async function fight(bot, state) {
+  const hostile = state.hostileEntity;
+  if (!hostile) return { success: false };
+  await meleeEngage(bot, hostile);
   return { success: true };
+}
+
+async function hunt(bot, state) {
+  const passive = state.passiveEntity;
+  if (!passive) return { success: false };
+  const { killed, lastKnownPos } = await meleeEngage(bot, passive, 6000);
+  if (killed) {
+    // Walk over to the drop so mineflayer's automatic item pickup grabs it.
+    await goNear(bot, lastKnownPos, 1);
+  }
+  return { success: true };
+}
+
+async function maintainWeapon(bot, memory) {
+  // Best weapon it can currently afford, preferring a sword but settling
+  // for an axe (also a real weapon in Minecraft) if sword ingredients are
+  // short. Tries best material tier down to whatever is craftable.
+  const candidates = ['iron_sword', 'stone_sword', 'wooden_sword', 'iron_axe', 'stone_axe', 'wooden_axe'];
+  for (const item of candidates) {
+    const already = bot.inventory.items().some((i) => i.name === item);
+    if (already) return { success: true };
+    const res = await craftItem(bot, memory, item);
+    if (res.success) return { success: true };
+  }
+  return { success: false };
 }
 
 async function eat(bot) {
@@ -221,7 +256,7 @@ async function craft(bot, memory, itemName) {
   return craftItem(bot, memory, itemName);
 }
 
-async function smelt(bot, memory) {
+async function useFurnace(bot, memory, inputPredicate) {
   const furnace = memory.buildings && memory.buildings.furnace;
   if (!furnace) return { success: false };
   const pos = new Vec3(furnace.origin.x, furnace.origin.y, furnace.origin.z);
@@ -232,10 +267,14 @@ async function smelt(bot, memory) {
   try {
     const furnaceWindow = await bot.openFurnace(block);
     const fuel = bot.inventory.items().find((i) => FUEL_ITEMS.includes(i.name));
-    const ore = bot.inventory.items().find((i) => i.name.endsWith('_ore'));
+    const input = bot.inventory.items().find((i) => inputPredicate(i.name));
+    if (!input) {
+      furnaceWindow.close();
+      return { success: false };
+    }
     if (fuel) await furnaceWindow.putFuel(fuel.type, null, Math.min(fuel.count, 8));
-    if (ore) await furnaceWindow.putInput(ore.type, null, ore.count);
-    await new Promise((r) => setTimeout(r, 10000)); // smelting takes real furnace time
+    await furnaceWindow.putInput(input.type, null, input.count);
+    await new Promise((r) => setTimeout(r, 10000)); // smelting/cooking takes real furnace time
     const output = furnaceWindow.outputItem();
     if (output) await furnaceWindow.takeOutput();
     furnaceWindow.close();
@@ -243,6 +282,14 @@ async function smelt(bot, memory) {
   } catch {
     return { success: false };
   }
+}
+
+async function smelt(bot, memory) {
+  return useFurnace(bot, memory, (name) => name.endsWith('_ore'));
+}
+
+async function cook(bot, memory) {
+  return useFurnace(bot, memory, (name) => Object.prototype.hasOwnProperty.call(RAW_TO_COOKED, name));
 }
 
 // --- Building ---------------------------------------------------------------
@@ -409,7 +456,10 @@ export function createExecutors(bandit) {
     ESCAPE_DANGER: (bot) => escapeDanger(bot),
     FLEE: (bot, memory, action, state) => flee(bot, state),
     FIGHT: (bot, memory, action, state) => fight(bot, state),
+    HUNT: (bot, memory, action, state) => hunt(bot, state),
     EAT: (bot) => eat(bot),
+    COOK: (bot, memory) => cook(bot, memory),
+    MAINTAIN_WEAPON: (bot, memory) => maintainWeapon(bot, memory),
     SEEK_SHELTER: (bot, memory) => seekShelter(bot, memory),
     SLEEP: (bot, memory) => sleep(bot, memory),
     GATHER_WOOD: (bot) => gatherWood(bot),

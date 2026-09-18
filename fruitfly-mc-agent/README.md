@@ -94,6 +94,7 @@ src/
   learning/
     bandit.js          epsilon-greedy bandit for non-critical choices (explore direction, blueprint order)
     reward.js           hand-shaped reward function for logging + bandit updates
+    lessons.js           death-cause classification + threshold retuning -- the "learn from mistakes" layer
   utils/
     blueprints.js      loads src/blueprints/*.json into flat block lists
     placement.js        places a blueprint block-by-block against solid neighbors
@@ -116,16 +117,20 @@ learned data yet) bot still behaves sensibly.
 
 ### Priority order each tick
 
-1. Immediate danger (fire/lava) → escape
-2. Hostile nearby → flee (low health or unarmed) or fight
-3. Hungry → eat, or harvest food from the farm
-4. Nightfall → emergency shelter / return to shelter / sleep
-5. No crafting table / tools → gather wood → craft
-6. No shelter → build the starter house
-7. Tool tier gate → gather stone/iron → craft the next tier, build a furnace
-8. No farm → build one; replant/harvest as crops mature
-9. City plan has a ready plot → build it (else gather what it needs)
-10. Nothing urgent → explore (bandit-weighted direction) to scout for the next plot
+1. Immediate danger (fire/lava, scanned with a learned safety margin) → escape
+2. Hostile nearby → flee (low health, unarmed, or a mob type learned to be dangerous) or fight
+3. Critically hungry (starvation-damage territory) → eat, harvest, or hunt
+4. Hungry past the learned buffer → eat if food is on hand
+5. Nightfall → emergency shelter / return to shelter / sleep
+6. No weapon on hand (lost, broken, never crafted) → craft/equip one before anything else
+7. Raw meat + furnace available → cook it for better nutrition
+8. Food reserves below the learned stockpile target → proactively harvest or hunt, even if not hungry yet
+9. No crafting table / tools → gather wood → craft
+10. No shelter → build the starter house
+11. Tool tier gate → gather stone/iron → craft the next tier, build a furnace
+12. No farm → build one; replant/harvest as crops mature
+13. City plan has a ready plot → build it (else gather what it needs)
+14. Nothing urgent → explore (bandit-weighted direction) to scout for the next plot
 
 ### City expansion
 
@@ -137,21 +142,67 @@ than a monument. Each plot records its blueprint, grid position, and
 completion status in `memory.json`, so the plan survives restarts and the
 bot resumes exactly where it left off.
 
-### Learning ("let it learn while it plays")
+### Learning — does it actually learn from its mistakes?
 
-Concretely, two things persist across restarts in `data/memory.json`:
+Yes, concretely, in the sense that specific numbers in the decision logic
+move in response to specific deaths, not just in the sense of remembering
+statistics. Three things persist across restarts in `data/memory.json`:
 
-1. **Bandit values** (`src/learning/bandit.js`) — running reward
+1. **Death-cause lessons** (`src/learning/lessons.js`) — the real "learn
+   from mistakes" mechanism. mineflayer's `death` event carries no cause,
+   so on death the bot classifies *why* from the last state snapshot
+   (`environmental_hazard`, `starvation`, `combat`, or an ambiguous
+   `unknown_low_health`/`unknown`) and retunes the thresholds
+   `decideNextAction()` uses next time:
+   - Died of **starvation** → raises the hunger buffer and the proactive
+     food-stockpile target, so it starts eating/harvesting/hunting earlier
+     next time.
+   - Died in **combat** → raises the health threshold at which it flees
+     instead of fighting, and remembers *which mob type* got the kill —
+     two losses to the same mob type (e.g. creepers) and it starts always
+     fleeing that type on sight, regardless of current health or weapon.
+   - Died to **lava/fire** → widens how far out it scans for hazardous
+     blocks before it's willing to call an area safe.
+
+   This is why the priority list above says "learned buffer" / "learned
+   safety margin" rather than fixed numbers — those are the same rule,
+   with parameters that move after real deaths. `test/lessons.test.js`
+   and the tuning-aware cases in `test/stateMachine.test.js` cover this
+   directly (e.g. "a raised flee-health threshold triggers flight sooner",
+   "repeated combat losses to the same mob eventually mark it as avoid").
+2. **Bandit values** (`src/learning/bandit.js`) — running reward
    estimates per (context, choice) pair, updated after every relevant
    action, that bias future *non-critical* choices (explore direction,
-   which city blueprint to prioritize when several are viable).
-2. **Lifetime stats** — deaths, best survival duration, milestone counts
-   (first crafting table, first stone tools, first iron tools, etc.) —
-   useful for tracking whether the agent is actually getting better run
-   over run.
+   which city blueprint to prioritize when several are viable). This
+   layer never touches survival-critical decisions.
+3. **Lifetime stats** — deaths (now broken down by cause), best survival
+   duration, milestone counts (first crafting table, first stone tools,
+   first iron tools, etc.) — useful for tracking whether the agent is
+   actually getting better run over run.
 
-This is honest online reinforcement-style learning at a small scale, not
-a neural network. See the roadmap below for scaling it up.
+This is honest online learning at a small scale — hand-written retuning
+rules over a hand-written policy, not a trained neural network. It *will*
+actually get safer over repeated deaths (higher flee thresholds, bigger
+food buffers, learned mob avoidance), but it won't discover strategies
+outside what the rule-based policy already knows how to do. See the
+roadmap below for what turning this into something that can learn novel
+strategies would take.
+
+### Always armed, always fed
+
+Two standing rules run on every tick, independent of whatever else is
+going on, once the bot has bootstrapped basic tools:
+
+- **Weapon**: if a crafting table has been used before but no weapon
+  (sword or axe) is currently in inventory — lost, broken, given away,
+  whatever — the very next thing it does is craft/equip one (best
+  available tier), before resuming farming/building/exploring.
+- **Food**: it doesn't wait to get hungry. Once food reserves drop below
+  a learned stockpile target (default 6 units, rising after a starvation
+  death), it proactively harvests the farm or hunts nearby passive mobs
+  (cows/pigs/chickens/sheep/rabbits) to top back up. Raw meat gets cooked
+  in the furnace when one's available, since it's edible either way but
+  cooked is strictly better nutrition per inventory slot.
 
 ## Dataset
 
@@ -170,8 +221,10 @@ python3 scripts/analyze_dataset.py --export training_data.jsonl
 npm test
 ```
 
-29 unit tests cover the state machine's full decision priority ordering,
-the bandit's exploration/exploitation behavior, the city planner's spiral
+49 unit tests cover the state machine's full decision priority ordering
+(including tuning-driven thresholds and weapon/food maintenance), the
+death-cause classification and threshold-retuning in `lessons.js`, the
+bandit's exploration/exploitation behavior, the city planner's spiral
 allocation and persistence, and blueprint loading/validation. These don't
 require a Minecraft server — only the mineflayer-facing code
 (`executors.js`, `perception.js`, `index.js`) needs a live connection to
